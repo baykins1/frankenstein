@@ -11,6 +11,8 @@
 #include <openthread/udp.h>
 #include <openthread/message.h>
 
+#include <openthread/border_router.h>
+
 LOG_MODULE_REGISTER(ot_controller, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* OpenThread networking definitions */
@@ -106,6 +108,24 @@ int main(void)
         return -1;
     }
     LOG_INF("OpenThread stack has been started.");
+
+    otBorderRouterConfig config;
+    otIp6Address prefix;
+    otIp6AddressFromString("fd11:22::", &prefix);
+    memset(&config, 0, sizeof(otBorderRouterConfig));
+    config.mPrefix.mPrefix = prefix;
+    config.mPrefix.mLength = 64;
+    config.mPreferred = true;
+    config.mSlaac = true;
+    config.mOnMesh = true;
+    config.mStable = true;
+    config.mDefaultRoute = true;
+    otBorderRouterAddOnMeshPrefix(openthread_get_default_instance(), &config);
+    LOG_INF("Successfully configured as a Border Router.");
+
+    while(1) {
+        k_sleep(K_SECONDS(1));
+    }
 
     return 0;
 }

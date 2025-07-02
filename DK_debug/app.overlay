@@ -1,0 +1,21 @@
+/*
+ * =================================================================
+ * ==       FINAL, VERIFIED app.overlay for nRF52840DK BR         ==
+ * =================================================================
+ */
+/ {
+    /* The 'chosen' node directs key kernel functions to specific hardware. */
+    chosen {
+        /* Route all console and shell output to the USB Virtual COM port. */
+        zephyr,console = &cdc_acm_uart;
+        zephyr,shell-uart = &cdc_acm_uart;
+    };
+};
+
+/* Define the USB CDC ACM UART device itself. */
+&zephyr_udc0 {
+    cdc_acm_uart: cdc_acm_uart {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "CDC_ACM_0";
+    };
+};

@@ -1,0 +1,20 @@
+/*
+* Devicetree overlay for enabling USB CDC ACM (Virtual COM Port)
+* on the Particle Argon's USB-C connector.
+*/
+
+/ {
+    chosen {
+        /* Tell the Zephyr shell to use the virtual USB UART as its backend */
+        zephyr,shell-uart = &cdc_acm_uart0;
+    };
+};
+
+/* Find the main USB device controller node */
+&zephyr_udc0 {
+    /* Define a new virtual UART device that uses the CDC ACM class */
+    cdc_acm_uart0: cdc_acm_uart_0 {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "CDC_ACM_0";
+    };
+};

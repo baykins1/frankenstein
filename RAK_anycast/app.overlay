@@ -1,0 +1,38 @@
+/*
+ * =================================================================
+ * ==           FINAL app.overlay for RAK/Argon End Node          ==
+ * =================================================================
+ */
+
+/ {
+    /* chosen node sets system-wide defaults */
+    chosen {
+        /* Route the console and shell to the USB virtual COM port */
+        zephyr,console = &cdc_acm_uart;
+        zephyr,shell-uart = &cdc_acm_uart;
+
+        /* Tell OpenThread which radio device to use. */
+        zephyr,ieee802154 = &radio;
+    };
+
+    leds {
+        compatible = "gpio-leds";
+        /* The RAK4631 and Argon both use P0.11 for an accessible LED */
+        led_d7: led_d7 {
+            gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
+        };
+    };
+
+    aliases {
+        /* Create a standard alias "led0" that our C code can use */
+        led0 = &led_d7;
+    };
+};
+
+/* Define the cdc_acm_uart instance on the USB controller */
+&zephyr_udc0 {
+    cdc_acm_uart: cdc_acm_uart {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "CDC_ACM_0";
+    };
+};
