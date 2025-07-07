@@ -1,6 +1,6 @@
 /*
  * =================================================================
- * ==          FINAL, VERIFIED Border Router Main                 ==
+ * ==          RTT-based Border Router Main                       ==
  * =================================================================
  */
 #include <zephyr/kernel.h>
@@ -8,10 +8,6 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
-
-// --- NEW: Required for USB CDC ACM console ---
-#include <zephyr/drivers/uart.h>
-#include <zephyr/usb/usb_device.h>
 
 #include <zephyr/net/openthread.h>
 #include <openthread/udp.h>
@@ -101,7 +97,8 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
 }
 
 // --- OpenThread state change callback ---
-static void on_thread_state_changed(otChangedFlags flags, struct openthread_context *ot_context) {
+static void on_thread_state_changed(otChangedFlags flags, struct openthread_context *ot_context, void *user_data) {
+    ARG_UNUSED(user_data);
     if (flags & OT_CHANGED_THREAD_ROLE) {
         otDeviceRole role = otThreadGetDeviceRole(ot_context->instance);
         if ((role == OT_DEVICE_ROLE_LEADER) || (role == OT_DEVICE_ROLE_ROUTER)) {
@@ -113,29 +110,6 @@ static void on_thread_state_changed(otChangedFlags flags, struct openthread_cont
 
 int main(void)
 {
-    // =================================================================
-    // ==               THE FINAL, DEFINITIVE FIX                   ==
-    // =================================================================
-    // This logic is taken from the working Nordic CLI sample.
-    // It ensures that the main application logic does not start until
-    // the USB CDC ACM (Virtual COM Port) is fully connected to the host PC.
-    // This solves the "silent" CLI problem.
-    int ret;
-	const struct device *cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
-	uint32_t dtr = 0;
-
-	if (usb_enable(NULL) != 0) {
-		LOG_ERR("Failed to enable USB");
-		return 0;
-	}
-
-	/* Wait for DTR flag to be set before proceeding */
-	while (!dtr) {
-		uart_line_ctrl_get(cons, UART_LINE_CTRL_DTR, &dtr);
-		k_sleep(K_MSEC(100));
-	}
-    // =================================================================
-
     LOG_INF("Starting Border Router Application");
 
     // --- Initialize GPIO ---
@@ -151,8 +125,8 @@ int main(void)
     LOG_INF("Button and LED initialized.");
 
     // --- Register state change handler ---
-    // The simplified API is correct for this SDK version.
-    openthread_state_changed_cb_register(openthread_get_default_context(), on_thread_state_changed);
+    ot_state_changed_cb_obj.state_changed_cb = on_thread_state_changed;
+    openthread_state_changed_cb_register(openthread_get_default_context(), &ot_state_changed_cb_obj);
 
     // --- Start OpenThread ---
     if (openthread_start(openthread_get_default_context()) != 0) {
@@ -178,6 +152,9 @@ int main(void)
     // --- Main Loop ---
     while(1) {
         k_sleep(K_SECONDS(5));
+        // Print status periodically
+        otDeviceRole role = otThreadGetDeviceRole(openthread_get_default_instance());
+        LOG_INF("Current role: %d, Reporting active: %s", role, reporting_is_active ? "YES" : "NO");
     }
 
     return 0; // Unreachable
