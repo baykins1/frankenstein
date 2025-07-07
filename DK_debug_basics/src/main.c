@@ -18,6 +18,8 @@
 #include <openthread/udp.h>
 #include <openthread/message.h>
 
+#include <openthread/border_router.h>
+
 LOG_MODULE_REGISTER(ot_controller, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define LED0_NODE DT_ALIAS(led0)
@@ -62,6 +64,16 @@ static void set_thread_network_config(otInstance *instance)
 
     // Apply dataset
     otDatasetSetActive(instance, &dataset);
+}
+
+static otUdpSocket rxSocket;
+
+static void udp_receive_cb(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo)
+{
+    char buf[32];
+    int len = otMessageRead(aMessage, 0, buf, sizeof(buf) - 1);
+    buf[len] = 0;
+    LOG_INF("Received UDP packet: %s", buf);
 }
 
 void send_multicast_command(const char *cmd)
@@ -193,6 +205,11 @@ int main(void)
         return -1;
     }
     LOG_INF("OpenThread stack has been started.");
+
+    otSockAddr listen_addr = {0};
+    listen_addr.mPort = OT_CONNECTION_LED_PORT;
+    otUdpOpen(instance, &rxSocket, udp_receive_cb, NULL);
+    otUdpBind(instance, &rxSocket, &listen_addr, OT_NETIF_THREAD);
 
     return 0;
 }

@@ -41,6 +41,8 @@ static void send_hello(void)
     char msg[32];
     snprintk(msg, sizeof(msg), "hello world %s", mac);
 
+    LOG_INF("Sending: %s", msg);
+
     otMessage *message = otUdpNewMessage(instance, NULL);
     if (!message) return;
     otMessageAppend(message, msg, strlen(msg));
@@ -63,6 +65,8 @@ static void udp_receive_cb(void *aContext, otMessage *aMessage, const otMessageI
     char buf[16];
     int len = otMessageRead(aMessage, 0, buf, sizeof(buf) - 1);
     buf[len] = 0;
+
+    LOG_INF("UDP received, payload=%s", buf);
 
     if (strcmp(buf, "start") == 0 && !streaming) {
         streaming = true;
@@ -121,7 +125,7 @@ int main(void)
 
     // Open UDP socket for multicast commands
     otSockAddr listen_addr = {0};
-    otIp6AddressFromString("ff03::1", &listen_addr.mAddress);
+    // otIp6AddressFromString("ff03::1", &listen_addr.mAddress);
     listen_addr.mPort = OT_CONNECTION_LED_PORT;
     otUdpOpen(instance, &udpSocket, udp_receive_cb, NULL);
     otUdpBind(instance, &udpSocket, &listen_addr, OT_NETIF_THREAD);
