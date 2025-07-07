@@ -178,7 +178,13 @@ int main(void)
 
     // Start OpenThread
     otInstance *instance = openthread_get_default_instance();
-    set_thread_network_config(instance);
+
+    // Only set dataset if not already set
+    otOperationalDataset currentDataset;
+    otError err = otDatasetGetActive(instance, &currentDataset);
+    if (err != OT_ERROR_NONE || !currentDataset.mComponents.mIsNetworkNamePresent) {
+        set_thread_network_config(instance);
+    }
 
     if (openthread_start(openthread_get_default_context()) != 0) {
         LOG_ERR("Failed to start OpenThread");
