@@ -18,13 +18,3 @@
         led0 = &led_d7;
     };
 };
-
-/* Enable USB device controller */
-&usbd {
-    status = "okay";
-};
-
-/* Optionally, set the CDC ACM as the console */
-&cdc_acm_uart0 {
-    status = "okay";
-};

@@ -151,6 +151,8 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
 */
 int main(void)
 {
+    k_sleep(K_MSEC(500));
+    
     int ret;
 
     LOG_INF("Starting OpenThread Controller Application");
