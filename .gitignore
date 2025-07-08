@@ -1,4 +1,5 @@
 build/
 *.a
 RAK/
-Xenon/
+xenon/
+argon/
