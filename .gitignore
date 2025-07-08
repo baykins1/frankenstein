@@ -5,3 +5,4 @@ xenon/
 argon/
 boards/
 .vscode/
+.venv/
