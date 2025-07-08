@@ -1,7 +1,0 @@
-{
-    "args": {
-        "pyocd": [
-            "--connect=under-reset"
-        ]
-    }
-}
