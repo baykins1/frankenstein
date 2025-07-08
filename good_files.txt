@@ -1,2 +1,0 @@
-barebones LED is dk_controller and argon_light
-full packets is dk_debug_basics and rak_debug_basics
