@@ -6,58 +6,63 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/net/openthread.h>
 #include <openthread/dataset_ftd.h>
 #include <openthread/joiner.h>
 #include <openthread/link.h>
 #include <openthread/thread_ftd.h>
-#include <zephyr/sys/printk.h>
-#include <zephyr/sys/util.h>
-
 #include <openthread/message.h>
 #include <openthread/udp.h>
-#include <zephyr/net/openthread.h>
-
 #include <openthread/border_router.h>
 
+/* Sets name inside of shell to see which messages come from that*/
 LOG_MODULE_REGISTER(ot_controller, CONFIG_LOG_DEFAULT_LEVEL);
 
+/* Pulls in alias for LED on controller, allows interaction*/
 #define LED0_NODE DT_ALIAS(led0)
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
-/* OpenThread networking definitions */
+/* OpenThread networking definitions
+Initialized to off
+Pointers for LED state as well as send state */
 #define OT_CONNECTION_LED_PORT 1234
 static const char *light_command = "toggle";
-
 static bool streaming = false;
-
 static const char *CMD_START = "start";
 static const char *CMD_STOP = "stop";
 
-/* GPIO definitions for the button */
+/* GPIO definitions for the button
+Callback executed when button is pressed */
 #define SW0_NODE DT_ALIAS(sw0)
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
+
 static struct gpio_callback button_cb_data;
 
+/* Dataset from Thread library that holds parameters to define
+a thread network
+Memset fills potential garbage data with all zeros
+strncpy for string (network name) memcpy for network key */
 static void set_thread_network_config(otInstance *instance) {
   otOperationalDataset dataset;
   memset(&dataset, 0, sizeof(dataset));
 
-  // Network Name
+  // Network Name (Doesn't overwrite existing name for some reason)
   dataset.mComponents.mIsNetworkNamePresent = true;
   strncpy(dataset.mNetworkName.m8, "Campos", OT_NETWORK_NAME_MAX_SIZE);
 
-  // Network Key
+  // Network Key (Does overwrite)
   dataset.mComponents.mIsNetworkKeyPresent = true;
   uint8_t key[16] = {0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44,
                      0x55, 0x55, 0x66, 0x66, 0x77, 0x77, 0x88, 0x88};
   memcpy(dataset.mNetworkKey.m8, key, 16);
 
-  // PAN ID
+  // PAN ID (Does overwrite)
   dataset.mComponents.mIsPanIdPresent = true;
   dataset.mPanId = 0xABCD;
 
-  // Channel
+  // Channel (Doesn't overwrite existing channel for some reason)
   dataset.mComponents.mIsChannelPresent = true;
   dataset.mChannel = 15;
 
@@ -65,6 +70,7 @@ static void set_thread_network_config(otInstance *instance) {
   otDatasetSetActive(instance, &dataset);
 }
 
+/* UDP implementation */
 static otUdpSocket rxSocket;
 
 static void udp_receive_cb(void *aContext, otMessage *aMessage,
@@ -75,12 +81,15 @@ static void udp_receive_cb(void *aContext, otMessage *aMessage,
   LOG_INF("Received UDP packet: %s", buf);
 }
 
+/* Constructs and sends a UDP packet
+gets default OpenThread instance and sends a message
+Sets destination to all other thread devices
+cleans up message buffer*/
 void send_multicast_command(const char *cmd) {
   otInstance *instance = openthread_get_default_instance();
   otMessage *message = otUdpNewMessage(instance, NULL);
   if (!message)
     return;
-
   otMessageAppend(message, cmd, strlen(cmd));
 
   otMessageInfo msgInfo = {0};
@@ -96,6 +105,8 @@ void send_multicast_command(const char *cmd) {
   }
 }
 
+/*Interrupt Service Routine (callback)
+if/else either turns LED on or off and starts or stops streaming */
 void button_pressed(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins) {
   streaming = !streaming;
@@ -152,29 +163,22 @@ void send_light_control_command(void) {
   otUdpClose(p_ot_instance, &udpSocket);
 }
 
-/* Button press callback function
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
-pins)
-{
-    LOG_INF("Button pressed, sending command.");
-    send_light_control_command();
-}
-*/
 int main(void) {
-  k_sleep(K_MSEC(500));
+  k_sleep(K_MSEC(500)); // Short sleep to allow debug in shell
 
   int ret;
 
   LOG_INF("Starting OpenThread Controller Application");
 
-  // LED init
+  // LED inititalized
   if (!device_is_ready(led.port)) {
     LOG_ERR("LED device not ready");
     return -1;
   }
+
   gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
 
-  // Button init
+  // Confugres button interrupts
   if (!device_is_ready(button.port)) {
     LOG_ERR("Button device not ready");
     return -1;
@@ -182,9 +186,11 @@ int main(void) {
   ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
   if (ret < 0)
     return -1;
+
   ret = gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_TO_ACTIVE);
   if (ret < 0)
     return -1;
+
   gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
   gpio_add_callback(button.port, &button_cb_data);
 
@@ -207,10 +213,11 @@ int main(void) {
   }
   LOG_INF("OpenThread stack has been started.");
 
+  // Open UDP socket for multicast commands
   otSockAddr listen_addr = {0};
   listen_addr.mPort = OT_CONNECTION_LED_PORT;
   otUdpOpen(instance, &rxSocket, udp_receive_cb, NULL);
   otUdpBind(instance, &rxSocket, &listen_addr, OT_NETIF_THREAD);
 
-  return 0;
+  return 0; //Function returns but is driven by interrupts and network events
 }

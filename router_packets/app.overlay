@@ -1,5 +1,5 @@
 /*
- * Devicetree overlay for the Particle Argon
+ * Devicetree overlay for the Particle Argon (Maybe Xenon and Rak too?)
  * This creates a standard 'leds' node and defines our custom led_d7 inside it.
  * This is the most compatible way to define an LED for Zephyr.
  */

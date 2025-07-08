@@ -1,9 +1,6 @@
-#include <openthread/dataset_ftd.h>
-#include <openthread/link.h>
-#include <openthread/message.h>
-#include <openthread/platform/radio.h>
-#include <openthread/thread_ftd.h>
-#include <openthread/udp.h>
+/*
+ * Transmitter Application Main
+ */
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -12,12 +9,22 @@
 #include <zephyr/net/openthread.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
+#include <openthread/dataset_ftd.h>
+#include <openthread/link.h>
+#include <openthread/message.h>
+#include <openthread/platform/radio.h>
+#include <openthread/thread_ftd.h>
+#include <openthread/udp.h>
 
+/* Sets name inside of shell to see which messages come from that*/
 LOG_MODULE_REGISTER(ot_end_device, CONFIG_LOG_DEFAULT_LEVEL);
 
+/* Pulls in alias for LED on controller, allows interaction*/
 #define LED0_NODE DT_ALIAS(led0)
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
+/* OpenThread networking definitions 
+UDP port defined for messages at specified interval*/
 #define OT_CONNECTION_LED_PORT 1234
 #define HELLO_INTERVAL_MS 1000
 
@@ -47,13 +54,14 @@ static void send_hello(void) {
   otMessageAppend(message, msg, strlen(msg));
 
   otMessageInfo msgInfo = {0};
-  // Send to border router (assume leader anycast address)
+  // Send Hello World message to all devices in the Thread network
   otIp6AddressFromString("ff03::1", &msgInfo.mPeerAddr);
   msgInfo.mPeerPort = OT_CONNECTION_LED_PORT;
 
   otUdpSend(instance, &udpSocket, message, &msgInfo);
 }
 
+/* UDP & Message implementation */
 static void hello_timer_handler(struct k_timer *timer_id) { send_hello(); }
 
 static void udp_receive_cb(void *aContext, otMessage *aMessage,
@@ -78,19 +86,33 @@ static void udp_receive_cb(void *aContext, otMessage *aMessage,
   }
 }
 
+/* Dataset from Thread library that holds parameters to define
+a thread network
+Memset fills potential garbage data with all zeros
+strncpy for string (network name) memcpy for network key */
 static void set_thread_network_config(otInstance *instance) {
   otOperationalDataset dataset;
   memset(&dataset, 0, sizeof(dataset));
+
+  // Network Name (Doesn't overwrite existing name for some reason)
   dataset.mComponents.mIsNetworkNamePresent = true;
   strncpy(dataset.mNetworkName.m8, "Campos", OT_NETWORK_NAME_MAX_SIZE);
+
+  // Network Key (Does overwrite)
   dataset.mComponents.mIsNetworkKeyPresent = true;
   uint8_t key[16] = {0x11, 0x11, 0x22, 0x22, 0x33, 0x33, 0x44, 0x44,
                      0x55, 0x55, 0x66, 0x66, 0x77, 0x77, 0x88, 0x88};
   memcpy(dataset.mNetworkKey.m8, key, 16);
+  
+  // PAN ID (Does overwrite)
   dataset.mComponents.mIsPanIdPresent = true;
   dataset.mPanId = 0xABCD;
+
+  // Channel (Doesn't overwrite existing channel for some reason)
   dataset.mComponents.mIsChannelPresent = true;
   dataset.mChannel = 15;
+
+  // Apply dataset
   otDatasetSetActive(instance, &dataset);
 }
 
@@ -98,12 +120,15 @@ int main(void) {
   int ret;
   LOG_INF("Starting OpenThread End Device");
 
+  // LED inititalized
   if (!device_is_ready(led.port)) {
     LOG_ERR("LED device not ready");
     return -1;
   }
+
   gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
 
+  // Start OpenThread
   otInstance *instance = openthread_get_default_instance();
 
   // Only set dataset if not already set
@@ -122,7 +147,6 @@ int main(void) {
 
   // Open UDP socket for multicast commands
   otSockAddr listen_addr = {0};
-  // otIp6AddressFromString("ff03::1", &listen_addr.mAddress);
   listen_addr.mPort = OT_CONNECTION_LED_PORT;
   otUdpOpen(instance, &udpSocket, udp_receive_cb, NULL);
   otUdpBind(instance, &udpSocket, &listen_addr, OT_NETIF_THREAD);
@@ -130,5 +154,5 @@ int main(void) {
   k_timer_init(&hello_timer, hello_timer_handler, NULL);
 
   LOG_INF("End device ready.");
-  return 0;
+  return 0;  //Function returns but is driven by interrupts and network events
 }
