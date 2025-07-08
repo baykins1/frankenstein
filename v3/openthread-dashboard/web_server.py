@@ -25,7 +25,7 @@ total_stats = {
     'start_time': datetime.now(timezone.utc).isoformat()
 }
 
-packet_timestamps = deque(maxlen=600)  # Store up to 10 minutes at 1Hz
+packet_timestamps = deque()  # Store up to 10 minutes at 1Hz
 
 # --- Flask & SocketIO Setup ---
 app = Flask(__name__)
@@ -53,25 +53,36 @@ def handle_connect():
 
 # --- Background Task for Missed Packets ---
 def check_for_missed_packets():
-    """Periodically checks if any device has missed packets based on expected interval."""
     while True:
-        time.sleep(1)  # Check every second
+        time.sleep(1)
         with data_lock:
             now = datetime.now(timezone.utc)
-            for device_id, stats in device_stats.items():
-                last_seen_dt = datetime.fromisoformat(stats['last_seen'])
-                # Calculate how many intervals have passed since last_seen
-                elapsed = (now - last_seen_dt).total_seconds()
-                missed = int(elapsed // PACKET_TIMEOUT_SECONDS)
-                if missed > 0:
-                    stats['failed_packets'] += missed
-                    # Move last_seen forward to the current time
-                    stats['last_seen'] = now.isoformat()
-                    print(f"Device {device_id} missed {missed} packet(s). Failed count: {stats['failed_packets']}")
-                    socketio.emit('stats_update', {
-                        'total_stats': total_stats,
-                        'device_stats': device_stats
-                    })
+            
+            # Find benchmark device: active device with lowest failed_packets
+            active_devices = [stats for stats in device_stats.values() if stats['total_packets'] > 10]
+            if active_devices:
+                benchmark = min(active_devices, key=lambda x: x['failed_packets'])
+                avg_interval = PACKET_TIMEOUT_SECONDS  # Default fallback
+                if benchmark['total_packets'] > 1:
+                    # Estimate interval: total time / total packets
+                    first_seen = datetime.fromisoformat(benchmark['last_seen']) - timedelta(
+                        seconds=(benchmark['total_packets'] - 1) * PACKET_TIMEOUT_SECONDS)
+                    total_time = (now - first_seen).total_seconds()
+                    avg_interval = total_time / benchmark['total_packets']
+                
+                for device_id, stats in device_stats.items():
+                    last_seen_dt = datetime.fromisoformat(stats['last_seen'])
+                    elapsed = (now - last_seen_dt).total_seconds()
+                    
+                    expected_interval = avg_interval * 2  # tolerate 2×
+                    missed = int(elapsed // expected_interval)
+                    
+                    if missed > 0:
+                        stats['failed_packets'] += missed
+                        stats['last_seen'] = now.isoformat()
+                        print(f"Device {device_id} missed {missed} packet(s).")
+                        socketio.emit('stats_update', {'total_stats': total_stats, 'device_stats': device_stats})
+
         
 # --- Main UDP Listener for Data from the Bridge ---
 def udp_listener():
@@ -97,12 +108,20 @@ def udp_listener():
                 # Track packet timestamps for rate calculation
                 packet_timestamps.append(now)
 
-                if device_id not in device_data:
+                if device_id not in device_stats:
                     device_data[device_id] = []
+                    now = datetime.now(timezone.utc)
+                    elapsed = (now - datetime.fromisoformat(total_stats['start_time'])).total_seconds()
+                    expected_interval = PACKET_TIMEOUT_SECONDS
+                    estimated_missed = int(elapsed // expected_interval)
+    
                     device_stats[device_id] = {
-                        'total_packets': 0, 'failed_packets': 0, 'last_seen': msg_timestamp, 'failure_counted': False
-                    }
-                    total_stats['total_devices'] = len(device_data)
+                        'total_packets': 0,
+                        'failed_packets': estimated_missed,
+                        'last_seen': msg_timestamp,
+                        'failure_counted': False
+                }
+                total_stats['total_devices'] = len(device_data)
 
                 message_payload = {
                     'timestamp': msg_timestamp,
