@@ -47,8 +47,9 @@ dependencies:
     version: '*'
 direct_dependencies:
 - espressif/esp_ot_cli_extension
+- espressif/led_strip
 - idf
 - ot_led
-manifest_hash: 963824e0a62a27ce0c2b82c605b67acbe18d1e3adb4ad12c98b0302b37ad6174
+manifest_hash: 03c3da13d78a7d3620b4aaa603845ec1557edd38b2f8902e88b36c7048fa89db
 target: esp32c6
 version: 2.0.0

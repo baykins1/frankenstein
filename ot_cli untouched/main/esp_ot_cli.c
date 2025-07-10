@@ -41,6 +41,7 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "openthread/udp.h"
+#include "led_strip.h"
 
 #if CONFIG_OPENTHREAD_STATE_INDICATOR_ENABLE
 #include "ot_led_strip.h"
@@ -55,10 +56,12 @@
 #define LED_GPIO_PIN 8
 #define OT_CONNECTION_LED_PORT 1234
 #define HELLO_INTERVAL_MS 1000
+#define LED_STRIP_LED_NUM 1
 
 static esp_timer_handle_t hello_timer;
 static bool streaming = false;
 static otUdpSocket udpSocket;
+static led_strip_handle_t led_strip;
 
 static esp_netif_t *init_openthread_netif(const esp_openthread_platform_config_t *config)
 {
@@ -128,6 +131,16 @@ static void get_mac_suffix(char *buf, size_t buflen) {
     snprintf(buf, buflen, "%02X%02X", ext_addr->m8[6], ext_addr->m8[7]);
 }
 
+// LED control functions
+static void led_on(void) {
+    led_strip_set_pixel(led_strip, 0, 16, 16, 16); // white
+    led_strip_refresh(led_strip);
+}
+
+static void led_off(void) {
+    led_strip_clear(led_strip);
+}
+
 static void send_hello(void *arg) {
     ESP_LOGI(TAG, "send_hello timer fired");
     otInstance *instance = esp_openthread_get_instance();
@@ -165,13 +178,13 @@ static void udp_receive_cb(void *aContext, otMessage *aMessage, const otMessageI
     if (strstr(buf, "start") && !streaming) {
         ESP_LOGI(TAG, "Entering start block");
         streaming = true;
-        gpio_set_level(LED_GPIO_PIN, 1);
+        led_on();
         esp_timer_start_periodic(hello_timer, HELLO_INTERVAL_MS * 1000);
         ESP_LOGI(TAG, "Received start, streaming...");
     } else if (strstr(buf, "stop") && streaming) {
         ESP_LOGI(TAG, "Entering stop block");
         streaming = false;
-        gpio_set_level(LED_GPIO_PIN, 0);
+        led_off();
         esp_timer_stop(hello_timer);
         ESP_LOGI(TAG, "Received stop, streaming stopped.");
     }
@@ -210,18 +223,31 @@ static void udp_task(void *pvParameters) {
     }
 }
 
+static void configure_led_strip(void) {
+    ESP_LOGI(TAG, "Configuring addressable LED strip!");
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = LED_GPIO_PIN,
+        .max_leds = LED_STRIP_LED_NUM,
+    };
+    led_strip_rmt_config_t rmt_config = {
+        .resolution_hz = 10 * 1000 * 1000,
+        .flags.with_dma = false,
+    };
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
+    led_strip_clear(led_strip);
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "app_main started");
-    gpio_config_t io_conf = {
-        .pin_bit_mask = 1ULL << LED_GPIO_PIN,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&io_conf);
-    ESP_LOGI(TAG, "GPIO configured");
+    configure_led_strip();
+    led_on();
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    led_off();
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    led_on();
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    led_off();
 
     // Used eventfds:
     // * netif
