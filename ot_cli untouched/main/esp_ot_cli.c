@@ -129,6 +129,7 @@ static void get_mac_suffix(char *buf, size_t buflen) {
 }
 
 static void send_hello(void *arg) {
+    ESP_LOGI(TAG, "send_hello timer fired");
     otInstance *instance = esp_openthread_get_instance();
     char mac[5];
     get_mac_suffix(mac, sizeof(mac));
@@ -149,6 +150,7 @@ static void send_hello(void *arg) {
 }
 
 static void udp_receive_cb(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo) {
+    ESP_LOGI(TAG, "udp_receive_cb called");
     char buf[32];
     int len = otMessageRead(aMessage, 0, buf, sizeof(buf) - 1);
     buf[len] = 0;
@@ -158,13 +160,16 @@ static void udp_receive_cb(void *aContext, otMessage *aMessage, const otMessageI
 
     ESP_LOGI(TAG, "UDP received, payload=%s", buf);
     ESP_LOGI(TAG, "From address: %s, port: %d", addr_str, aMessageInfo->mPeerPort);
+    ESP_LOGI(TAG, "streaming=%d, strstr_start=%p, strstr_stop=%p", streaming, strstr(buf, "start"), strstr(buf, "stop"));
 
-    if (strcmp(buf, "start") == 0 && !streaming) {
+    if (strstr(buf, "start") && !streaming) {
+        ESP_LOGI(TAG, "Entering start block");
         streaming = true;
         gpio_set_level(LED_GPIO_PIN, 1);
         esp_timer_start_periodic(hello_timer, HELLO_INTERVAL_MS * 1000);
         ESP_LOGI(TAG, "Received start, streaming...");
-    } else if (strcmp(buf, "stop") == 0 && streaming) {
+    } else if (strstr(buf, "stop") && streaming) {
+        ESP_LOGI(TAG, "Entering stop block");
         streaming = false;
         gpio_set_level(LED_GPIO_PIN, 0);
         esp_timer_stop(hello_timer);
@@ -176,8 +181,38 @@ static void configure_thread_network(otInstance *instance) {
     ESP_LOGI(TAG, "Thread network configuration is expected to be set via CLI.");
 }
 
+static void udp_task(void *pvParameters) {
+    ESP_LOGI(TAG, "udp_task started");
+    // Wait for OpenThread stack and CLI to be ready
+    vTaskDelay(5000 / portTICK_PERIOD_MS); // Wait 5 seconds for network up (adjust as needed)
+
+    otInstance *instance = esp_openthread_get_instance();
+    configure_thread_network(instance);
+    ESP_LOGI(TAG, "Thread network configured (udp_task)");
+
+    esp_timer_create_args_t timer_args = {
+        .callback = &send_hello,
+        .name = "hello_timer"
+    };
+    esp_timer_create(&timer_args, &hello_timer);
+    ESP_LOGI(TAG, "Timer created (udp_task)");
+
+    otSockAddr listen_addr = {0};
+    otIp6AddressFromString("::", &listen_addr.mAddress);
+    listen_addr.mPort = OT_CONNECTION_LED_PORT;
+    otUdpOpen(instance, &udpSocket, udp_receive_cb, NULL);
+    otUdpBind(instance, &udpSocket, &listen_addr, OT_NETIF_THREAD_INTERNAL);
+    ESP_LOGI(TAG, "UDP socket opened and bound (udp_task)");
+
+    // Task can sleep forever, UDP and timer callbacks do the work
+    while (1) {
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
+    }
+}
+
 void app_main(void)
 {
+    ESP_LOGI(TAG, "app_main started");
     gpio_config_t io_conf = {
         .pin_bit_mask = 1ULL << LED_GPIO_PIN,
         .mode = GPIO_MODE_OUTPUT,
@@ -186,20 +221,7 @@ void app_main(void)
         .intr_type = GPIO_INTR_DISABLE
     };
     gpio_config(&io_conf);
-
-    esp_timer_create_args_t timer_args = {
-        .callback = &send_hello,
-        .name = "hello_timer"
-    };
-    esp_timer_create(&timer_args, &hello_timer);
-
-    otInstance *instance = esp_openthread_get_instance();
-    configure_thread_network(instance);
-
-    otSockAddr listen_addr = {0};
-    listen_addr.mPort = OT_CONNECTION_LED_PORT;
-    otUdpOpen(instance, &udpSocket, udp_receive_cb, NULL);
-    otUdpBind(instance, &udpSocket, &listen_addr, OT_NETIF_THREAD_INTERNAL);
+    ESP_LOGI(TAG, "GPIO configured");
 
     // Used eventfds:
     // * netif
@@ -213,5 +235,8 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));
+    ESP_LOGI(TAG, "Before xTaskCreate");
     xTaskCreate(ot_task_worker, "ot_cli_main", 10240, xTaskGetCurrentTaskHandle(), 5, NULL);
+    xTaskCreate(udp_task, "udp_task", 8192, NULL, 5, NULL);
+    ESP_LOGI(TAG, "app_main finished");
 }
