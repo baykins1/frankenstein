@@ -24,7 +24,7 @@
 #include "esp_openthread_lock.h"
 #include "esp_openthread_netif_glue.h"
 #include "esp_openthread_types.h"
-#include "esp_ot_config.h"
+#include "cli_header.h"
 #include "openthread/cli.h"
 #include "openthread/instance.h"
 #include "openthread/logging.h"
