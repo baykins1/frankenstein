@@ -86,10 +86,11 @@ static void ot_task_worker(void *aContext)
     openthread_netif = init_openthread_netif(&config);
     esp_netif_set_default_netif(openthread_netif);
 
+/*
 #if CONFIG_OPENTHREAD_CLI_ESP_EXTENSION
     esp_cli_custom_command_init();
 #endif // CONFIG_OPENTHREAD_CLI_ESP_EXTENSION
-
+*/
     // Run the main loop
 #if CONFIG_OPENTHREAD_CLI
     esp_openthread_cli_create_task();
@@ -175,7 +176,96 @@ static void udp_receive_cb(void *aContext, otMessage *aMessage, const otMessageI
 }
 
 static void configure_thread_network(otInstance *instance) {
-    ESP_LOGI(TAG, "Thread network configuration is expected to be set via CLI.");
+    ESP_LOGI(TAG, "Configuring Thread network automatically...");
+    
+    // Check if we already have an active dataset
+    otOperationalDatasetTlvs dataset;
+    otError error = otDatasetGetActiveTlvs(instance, &dataset);
+    
+    if (error != OT_ERROR_NONE) {
+        ESP_LOGI(TAG, "No active dataset found. Starting with basic configuration...");
+    } else {
+        ESP_LOGI(TAG, "Active dataset found, proceeding with network startup...");
+    }
+    
+    // Enable IPv6 interface (equivalent to "ifconfig up")
+    ESP_LOGI(TAG, "Enabling IPv6 interface...");
+    error = otIp6SetEnabled(instance, true);
+    if (error == OT_ERROR_NONE) {
+        ESP_LOGI(TAG, "IPv6 enabled successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to enable IPv6: %d", error);
+        return;
+    }
+    
+    // Start Thread (equivalent to "thread start")
+    ESP_LOGI(TAG, "Starting Thread protocol...");
+    error = otThreadSetEnabled(instance, true);
+    if (error == OT_ERROR_NONE) {
+        ESP_LOGI(TAG, "Thread started successfully");
+    } else {
+        ESP_LOGE(TAG, "Failed to start Thread: %d", error);
+        return;
+    }
+    
+    // Wait for the network to stabilize and check status
+    ESP_LOGI(TAG, "Waiting for Thread network to establish...");
+    int max_wait_seconds = 30;
+    int wait_count = 0;
+    
+    while (wait_count < max_wait_seconds) {
+        otDeviceRole role = otThreadGetDeviceRole(instance);
+        
+        if (role == OT_DEVICE_ROLE_CHILD || role == OT_DEVICE_ROLE_ROUTER || role == OT_DEVICE_ROLE_LEADER) {
+            const char* roleStr;
+            switch (role) {
+                case OT_DEVICE_ROLE_CHILD: roleStr = "child"; break;
+                case OT_DEVICE_ROLE_ROUTER: roleStr = "router"; break;
+                case OT_DEVICE_ROLE_LEADER: roleStr = "leader"; break;
+                default: roleStr = "attached"; break;
+            }
+            ESP_LOGI(TAG, "Thread network established! Device role: %s", roleStr);
+            return;
+        }
+        
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        wait_count++;
+        
+        // Provide periodic status updates
+        if (wait_count % 5 == 0) {
+            const char* roleStr;
+            switch (otThreadGetDeviceRole(instance)) {
+                case OT_DEVICE_ROLE_DISABLED: roleStr = "disabled"; break;
+                case OT_DEVICE_ROLE_DETACHED: roleStr = "detached"; break;
+                case OT_DEVICE_ROLE_CHILD: roleStr = "child"; break;
+                case OT_DEVICE_ROLE_ROUTER: roleStr = "router"; break;
+                case OT_DEVICE_ROLE_LEADER: roleStr = "leader"; break;
+                default: roleStr = "unknown"; break;
+            }
+            ESP_LOGI(TAG, "Still connecting... Current role: %s (%d/%d seconds)", roleStr, wait_count, max_wait_seconds);
+        }
+    }
+    
+    // Network didn't fully establish, but log the final state
+    ESP_LOGW(TAG, "Thread network setup completed, but device may still be connecting after %d seconds", max_wait_seconds);
+    const char* roleStr;
+    otDeviceRole finalRole = otThreadGetDeviceRole(instance);
+    switch (finalRole) {
+        case OT_DEVICE_ROLE_DISABLED: roleStr = "disabled"; break;
+        case OT_DEVICE_ROLE_DETACHED: roleStr = "detached"; break;
+        case OT_DEVICE_ROLE_CHILD: roleStr = "child"; break;
+        case OT_DEVICE_ROLE_ROUTER: roleStr = "router"; break;
+        case OT_DEVICE_ROLE_LEADER: roleStr = "leader"; break;
+        default: roleStr = "unknown"; break;
+    }
+    ESP_LOGW(TAG, "Final Thread role: %s", roleStr);
+    
+    if (finalRole == OT_DEVICE_ROLE_DETACHED) {
+        ESP_LOGW(TAG, "Device is detached. This may mean:");
+        ESP_LOGW(TAG, "  - No dataset configured (need 'dataset init new; dataset commit active')");
+        ESP_LOGW(TAG, "  - No other Thread devices in range to join");
+        ESP_LOGW(TAG, "  - Use CLI to manually configure the network");
+    }
 }
 
 static void udp_task(void *pvParameters) {
